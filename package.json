@@ -1,0 +1,20 @@
+{
+  "name": "goose-rfp-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Slack /rfpbot: creates Cvent Guest RFPs for a list of hotels (Playwright script + small job server).",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test tests/ && python3 -m unittest discover -s tests -p 'test_*.py'"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@slack/socket-mode": "^3.1.0",
+    "express": "^4.19.2"
+  }
+}

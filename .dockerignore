@@ -1,0 +1,15 @@
+# Secrets and local state must never be baked into the image: pass them at run time
+# (docker run --env-file prod.env -v rfp-state:/data ...).
+.env
+.env.*
+!.env.example
+data
+state
+.git
+node_modules
+rfp/.venv
+rfp/__pycache__
+tests
+*.log
+step*.png
+failed.png

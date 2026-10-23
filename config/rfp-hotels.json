@@ -1,0 +1,31 @@
+{
+  "hotels": [
+    {
+      "name": "Sheraton Suites Market Center Dallas"
+    },
+    {
+      "name": "Henderson Beach Resort"
+    },
+    {
+      "name": "Courtyard by Marriott Culver City Los Angeles"
+    },
+    {
+      "name": "Hilton Dallas Lincoln Centre by the Galleria"
+    },
+    {
+      "name": "Sheraton Park Hotel at the Anaheim Resort"
+    },
+    {
+      "name": "Courtyard by Marriott Boulder Broomfield"
+    },
+    {
+      "name": "Sheraton Grand Nashville Downtown - NEWLY RENOVATED"
+    },
+    {
+      "name": "Residence Inn by Marriott Austin Parmer/Tech Ridge"
+    },
+    {
+      "name": "The Westin San Diego Bayview"
+    }
+  ]
+}

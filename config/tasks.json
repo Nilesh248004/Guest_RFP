@@ -1,0 +1,50 @@
+{
+  "tasks": [
+    {
+      "id": "guest-rfp-creation",
+      "name": "Guest RFP Creation",
+      "description": "Create a Guest RFP on Cvent for one venue (headless browser). Posts the result to Slack; confirmations are asked in Slack before submitting.",
+      "command": [
+        "{{root}}/rfp/.venv/bin/python",
+        "-u",
+        "{{root}}/rfp/rfp.py",
+        "--venue",
+        "{{venue_name}}"
+      ],
+      "env": {
+        "SLACK_CHANNEL_ID": "{{slack_channel_id}}",
+        "RFP_APPROVER": "{{approver}}",
+        "RFP_REQUESTED_BY": "{{requested_by}}"
+      },
+      "timeoutMs": 7500000,
+      "maxConcurrent": 1,
+      "resultMarker": true,
+      "params": [
+        {
+          "key": "venue_name",
+          "description": "Exact venue title as shown on Cvent.",
+          "required": true,
+          "pattern": "^[A-Za-z0-9À-ÿ &'’.,()/:-]{2,150}$"
+        },
+        {
+          "key": "slack_channel_id",
+          "description": "Optional. Slack channel for the confirmations. Defaults to the RFP channel.",
+          "required": false,
+          "pattern": "^C[A-Z0-9]{6,}$"
+        },
+        {
+          "key": "requested_by",
+          "description": "Optional. Slack user ID (U...) of the person who asked for this RFP; named in the result message.",
+          "required": false,
+          "pattern": "^[UW][A-Z0-9]{6,}$"
+        },
+        {
+          "key": "approver",
+          "description": "Optional. Slack user ID (U...) allowed to answer yes/no. Blank = any human in the channel.",
+          "required": false,
+          "pattern": "^U[A-Z0-9]{6,}$"
+        }
+      ]
+    }
+  ]
+}

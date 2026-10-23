@@ -1,0 +1,12 @@
+node_modules/
+.env
+data/
+state/
+*.log
+rfp/.venv/
+rfp/__pycache__/
+tests/__pycache__/
+*.tmp
+.rfp.lock
+step*.png
+failed.png
