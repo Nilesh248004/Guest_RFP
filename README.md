@@ -129,6 +129,7 @@ The tests never touch Cvent or Slack.
 
 - **`/rfpbot is not a valid command`**: the slash command isn't registered; re-apply the manifest and reinstall the app.
 - **Form opens but nothing happens / `dispatch_failed`**: Socket Mode off, or `SLACK_BOT_ENABLED` not `true`.
+- **Socket Mode ping/pong timeout warnings**: the bot now allows 15 seconds for a pong and 60 seconds for a server ping, then reconnects automatically. Repeated reconnects still indicate host load or outbound network instability; check container CPU/memory and connectivity to Slack.
 - **`channel_not_found` / no messages**: the bot is not in the channel, or `SLACK_CHANNEL_ID` is wrong.
 - **`not found among the N results shown`**: the hotel name differs from Cvent's title; fix it in `config/rfp-hotels.json`.
 - A run's screenshots and log: `data/jobs/<id>/` (`failed.png` shows where it stopped).

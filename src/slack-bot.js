@@ -345,7 +345,17 @@ export async function startSlackBot() {
     log(`warning: cannot read ${cfg.hotelsFile}: ${err.message}`);
   }
 
-  const client = new SocketModeClient({ appToken: cfg.appToken });
+  const client = new SocketModeClient({
+    appToken: cfg.appToken,
+    clientPingTimeout: 15000,
+    serverPingTimeout: 60000,
+  });
+  let hasConnected = false;
+  client.on("reconnecting", () => log("Slack connection interrupted; reconnecting"));
+  client.on("connected", () => {
+    if (hasConnected) log("Slack connection restored");
+    hasConnected = true;
+  });
   const safe = (fn) => async (event) => {
     try {
       await fn(event);
