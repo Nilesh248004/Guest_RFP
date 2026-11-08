@@ -129,9 +129,22 @@ def continue_as_guest(page):
     fill_event_details(page)
 
 
+def choose_event_type(page):
+    """Offer Cvent's own event types as a Slack dropdown; the venue is already confirmed."""
+    labels = [o.strip() for o in page.locator("select#type option").all_inner_texts()]
+    labels = [l for l in labels if l and not re.match(r"(select|choose)\b", l, re.I)]
+    picked = slack_notify.ask_choice(
+        f"Venue confirmed: *{RUN['venue']}*. Which *event type* should this RFP use?", labels)
+    if not picked:
+        raise Cancelled("No event type was chosen.")
+    return picked
+
+
 def fill_event_details(page):
-    page.locator("select#type").select_option(label="Corporate event")
-    print("Event type: Corporate event")
+    event_type = choose_event_type(page)
+    page.locator("select#type").select_option(label=event_type)
+    RUN["event_type"] = event_type
+    print("Event type:", event_type)
 
     arrival, departure = dates.event_dates(venue=RUN["venue"])
     RUN["arrival"], RUN["departure"] = arrival, departure
@@ -303,6 +316,7 @@ def review_and_submit(page, run):
     notify_slack(
         "step11_submitted.png",
         f":white_check_mark: *RFP submitted* for *{RUN['venue']}*\n"
+        f"Event type: {RUN['event_type']}\n"
         f"Client org: {run['org_name']}\nContact: {run['email']}\n"
         f"{requested_by_line()}"
         f"Event: {RUN['arrival']:%m/%d/%Y} -> {RUN['departure']:%m/%d/%Y}\n"

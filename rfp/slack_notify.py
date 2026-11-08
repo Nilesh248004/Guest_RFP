@@ -185,3 +185,60 @@ def ask_yes_no(question, images=(), details=None):
                 return answer
     send_text("No answer received in time. Cancelling.")
     return False
+
+
+CHOICE_PICKED = re.compile(r"Event type: \*(.+?)\*")
+
+
+def ask_choice(question, options):
+    """Ask for one of `options` (list of strings) and return the pick, or None on timeout.
+
+    Slack: posts a dropdown. The Socket Mode bot (src/slack-bot.js) turns the message into
+    "Event type: *<pick>*" when someone chooses, and this function reads that back.
+    """
+    if terminal_mode():
+        print("\n" + question.replace("*", ""), flush=True)
+        for i, o in enumerate(options, 1):
+            print(f"  {i}. {o}", flush=True)
+        while True:
+            try:
+                reply = input("Type the number of your choice: ").strip()
+            except EOFError:
+                return None
+            if reply.isdigit() and 1 <= int(reply) <= len(options):
+                return options[int(reply) - 1]
+            print("Please type one of the numbers above.")
+    if relay_mode():
+        rid = _new_id()
+        answer = _relay_dir() / f"{rid}.answer"   # the agent writes the chosen option here
+        _relay_write("choice_needed", {"question": question, "options": options,
+                                       "answer_file": str(answer)}, rid=rid)
+        deadline = time.time() + TIMEOUT_SECONDS
+        while time.time() < deadline:
+            if answer.exists() and answer.read_text().strip() in options:
+                return answer.read_text().strip()
+            time.sleep(POLL_SECONDS)
+        return None
+
+    client = _client()
+    posted = client.chat_postMessage(
+        channel=_channel(), text=question,
+        blocks=[
+            {"type": "section", "text": {"type": "mrkdwn", "text": question}},
+            {"type": "actions", "block_id": "rfp_event_type", "elements": [{
+                "type": "static_select", "action_id": "rfp_event_type",
+                "placeholder": {"type": "plain_text", "text": "Select event type"},
+                "options": [{"text": {"type": "plain_text", "text": o[:75]}, "value": o[:150]}
+                            for o in options[:100]],
+            }]},
+        ])
+    ts = posted["ts"]
+    deadline = time.time() + TIMEOUT_SECONDS
+    while time.time() < deadline:
+        time.sleep(POLL_SECONDS)
+        msgs = client.conversations_history(channel=_channel(), latest=ts, inclusive=True, limit=1)["messages"]
+        m = CHOICE_PICKED.search(msgs[0].get("text", "")) if msgs else None
+        if m and m.group(1) in options:
+            return m.group(1)
+    send_text("No event type chosen in time. Cancelling.")
+    return None

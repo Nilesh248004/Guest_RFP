@@ -232,6 +232,23 @@ export async function onInteractive({ body, ack }) {
     await ack({ options: hotelOptions(hotels, body.value) });
     return;
   }
+  if (body.type === "block_actions" && body.actions?.some((a) => a.action_id === "rfp_event_type")) {
+    // Event-type dropdown posted by the RFP script. Rewriting the message records the pick, which
+    // the script reads back, and removes the dropdown so it cannot be answered twice.
+    await ack();
+    const pick = body.actions.find((a) => a.action_id === "rfp_event_type").selected_option?.value;
+    const user = body.user?.id;
+    if (pick && allowed(user)) {
+      const text = `:white_check_mark: Event type: *${pick}* (picked by <@${user}>)`;
+      await api("chat.update", {
+        channel: body.container?.channel_id || body.channel?.id,
+        ts: body.container?.message_ts || body.message?.ts,
+        text,
+        blocks: [{ type: "section", text: { type: "mrkdwn", text } }],
+      });
+    }
+    return;
+  }
   if (body.type === "block_actions") {
     await ack();
     const picked = body.actions?.find((a) => a.action_id === "action")?.selected_option?.value;
