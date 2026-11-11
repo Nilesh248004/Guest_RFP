@@ -82,10 +82,9 @@ _SKIP_WORDS = {"a", "an", "and", "at", "by", "for", "in", "of", "the"}
 
 
 def venue_code(venue):
-    """Code for one venue, or the codes of several joined with '-' (e.g. 'WIA-HBR')."""
-    if not isinstance(venue, str):
-        return "-".join(filter(None, (venue_code(v) for v in venue)))
-    return _venue_code(venue)
+    """Code for one venue. For an RFP to several venues there is no code (plain naming)."""
+    venues = _as_list(venue)
+    return _venue_code(venues[0]) if len(venues) == 1 else ""
 
 
 def _venue_code(venue):
