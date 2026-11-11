@@ -15,6 +15,7 @@ import { enqueue } from "./runner.js";
 const TASK_ID = "guest-rfp-creation";
 const CALLBACK_CREATE = "rfp_create";
 const CALLBACK_ADD = "rfp_add";
+const MAX_HOTELS = 10;
 const MODE_LABELS = { create: "Create Guest RFP", add: "Add hotel" };
 const SEED_FILE = path.join(config.projectRoot, "config", "rfp-hotels.json");
 const TERMINAL = new Set(["succeeded", "failed", "canceled", "timeout"]);
@@ -79,7 +80,7 @@ export function loadHotels(file = cfg.hotelsFile) {
 export function addHotel(rawName, file = cfg.hotelsFile) {
   const name = String(rawName || "").replace(/\s+/g, " ").trim();
   const task = getTask(TASK_ID);
-  if (task && !validateParams(task, { venue_name: name }).ok) {
+  if (name.includes("|") || (task && !validateParams(task, { venue_name: name }).ok)) {
     return { ok: false, error: "Use the name exactly as shown on Cvent: 2 to 150 characters, letters, numbers, spaces and . , ' & ( ) / : -" };
   }
   const existing = loadHotels(file);
@@ -144,18 +145,19 @@ export function buildModal(mode = "create") {
       {
         type: "input",
         block_id: "hotel",
-        label: { type: "plain_text", text: "Hotel" },
+        label: { type: "plain_text", text: "Hotel(s)" },
         element: {
-          type: "external_select",
+          type: "multi_external_select",
           action_id: "hotel",
           min_query_length: 0,
-          placeholder: { type: "plain_text", text: "Search or select a hotel" },
+          max_selected_items: MAX_HOTELS,
+          placeholder: { type: "plain_text", text: "Search or select one or more hotels" },
         },
       },
       {
         type: "context",
         elements: [
-          { type: "mrkdwn", text: `A Guest RFP is created on Cvent for the hotel you pick. The result is posted in <#${cfg.channel}>.` },
+          { type: "mrkdwn", text: `Pick one or more hotels: a single Guest RFP is created on Cvent and sent to all of them. The result is posted in <#${cfg.channel}>.` },
         ],
       }
     );
@@ -221,6 +223,9 @@ export async function onSlash({ body, ack }) {
   }
 }
 
+// Dropdowns posted by the RFP script: action_id -> label written into the recorded message.
+const RFP_CHOICES = { rfp_event_type: "Event type", rfp_room_setup: "Room setup" };
+
 export async function onInteractive({ body, ack }) {
   if (body.type === "block_suggestion") {
     let hotels = [];
@@ -232,14 +237,15 @@ export async function onInteractive({ body, ack }) {
     await ack({ options: hotelOptions(hotels, body.value) });
     return;
   }
-  if (body.type === "block_actions" && body.actions?.some((a) => a.action_id === "rfp_event_type")) {
+  if (body.type === "block_actions" && body.actions?.some((a) => RFP_CHOICES[a.action_id])) {
     // Event-type dropdown posted by the RFP script. Rewriting the message records the pick, which
     // the script reads back, and removes the dropdown so it cannot be answered twice.
     await ack();
-    const pick = body.actions.find((a) => a.action_id === "rfp_event_type").selected_option?.value;
+    const chosen = body.actions.find((a) => RFP_CHOICES[a.action_id]);
+    const pick = chosen.selected_option?.value;
     const user = body.user?.id;
     if (pick && allowed(user)) {
-      const text = `:white_check_mark: Event type: *${pick}* (picked by <@${user}>)`;
+      const text = `:white_check_mark: ${RFP_CHOICES[chosen.action_id]}: *${pick}* (picked by <@${user}>)`;
       await api("chat.update", {
         channel: body.container?.channel_id || body.channel?.id,
         ts: body.container?.message_ts || body.message?.ts,
@@ -276,24 +282,29 @@ export async function onInteractive({ body, ack }) {
   }
   if (body.type === "view_submission" && body.view?.callback_id === CALLBACK_CREATE) {
     const user = body.user?.id;
-    const picked = body.view.state?.values?.hotel?.hotel?.selected_option?.value;
-    const hotel = loadHotels().find((h) => h.id === picked);
+    const el = body.view.state?.values?.hotel?.hotel;
+    const ids = (el?.selected_options || (el?.selected_option ? [el.selected_option] : [])).map((o) => o.value);
+    const all = loadHotels();
+    const picked = [...new Set(ids)].map((id) => all.find((h) => h.id === id)).filter(Boolean);
     if (!allowed(user)) {
       await ack({ response_action: "errors", errors: { hotel: "You are not allowed to create Guest RFPs." } });
       return;
     }
-    if (!hotel) {
-      await ack({ response_action: "errors", errors: { hotel: "Pick a hotel from the list." } });
+    if (picked.length === 0) {
+      await ack({ response_action: "errors", errors: { hotel: "Pick at least one hotel from the list." } });
       return;
     }
     await ack(); // closes the form
-    await startRfp(user, hotel);
+    await startRfp(user, picked);
     return;
   }
   await ack();
 }
 
-export async function startRfp(user, hotel) {
+/** `hotels`: one hotel or an array. Several hotels become ONE RFP sent to all of them. */
+export async function startRfp(user, hotels) {
+  const list = Array.isArray(hotels) ? hotels : [hotels];
+  const hotel = { name: list.map((h) => h.name).join(", "), venue: list.map((h) => h.venue).join("|") };
   const task = getTask(TASK_ID);
   if (!task) {
     await tell(user, `:x: The \`${TASK_ID}\` task is not configured on the server.`);
@@ -308,7 +319,8 @@ export async function startRfp(user, hotel) {
   }
 
   const active = listJobs().filter((j) => j.taskId === TASK_ID && (j.status === "queued" || j.status === "running"));
-  const same = active.find((j) => String(j.params?.venue_name || "").toLowerCase() === hotel.venue.toLowerCase());
+  const mine = new Set(list.map((h) => h.venue.toLowerCase()));
+  const same = active.find((j) => String(j.params?.venue_name || "").toLowerCase().split("|").some((v) => mine.has(v.trim())));
   if (same) {
     await tell(user, `:information_source: A Guest RFP for *${hotel.name}* is already ${same.status === "running" ? "running" : "queued"}, so I did not start another one.`);
     return null;

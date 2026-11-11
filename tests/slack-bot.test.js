@@ -41,7 +41,7 @@ test("/rfpbot opens a form whose first dropdown redraws it", async () => {
   assert.equal(ack.called, 1);
   assert.equal(view.blocks[0].dispatch_action, true);
   assert.deepEqual(view.blocks[0].element.options.map((o) => o.text.text), ["Create Guest RFP", "Add hotel"]);
-  assert.equal(view.blocks[1].element.type, "external_select");
+  assert.equal(view.blocks[1].element.type, "multi_external_select");
 });
 
 test("choosing Add hotel shows a name box, choosing Create shows the hotel list", async () => {
@@ -51,7 +51,7 @@ test("choosing Add hotel shows a name box, choosing Create shows the hotel list"
   assert.equal(calls[0].method, "views.update");
   assert.equal(calls[0].body.view.blocks[1].element.type, "plain_text_input");
   await pick("create");
-  assert.equal(calls[1].body.view.blocks[1].element.type, "external_select");
+  assert.equal(calls[1].body.view.blocks[1].element.type, "multi_external_select");
 });
 
 test("typing in the hotel select filters the list", async () => {

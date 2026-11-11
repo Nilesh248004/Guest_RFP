@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 from datetime import date, timedelta
 from pathlib import Path
@@ -28,20 +29,26 @@ def _venue_key(venue):
     return " ".join(venue.lower().split())
 
 
+def _as_list(venue):
+    """One venue name or a list of them -> list."""
+    return [venue] if isinstance(venue, str) else list(venue or [])
+
+
 def last_departure(venue):
-    """Departure date of the latest submitted RFP for this venue, or None."""
+    """Departure date of the latest submitted RFP for this venue (or the latest across several), or None."""
     if not VENUE_LOG_FILE.exists():
         return None
-    saved = json.loads(VENUE_LOG_FILE.read_text()).get(_venue_key(venue))
-    return date.fromisoformat(saved) if saved else None
+    log = json.loads(VENUE_LOG_FILE.read_text())
+    saved = [date.fromisoformat(log[_venue_key(v)]) for v in _as_list(venue) if _venue_key(v) in log]
+    return max(saved) if saved else None
 
 
 def record_event(venue, departure):
-    """Call this only after a real, approved submit."""
+    """Call this only after a real, approved submit. Records every venue of the RFP."""
     log = json.loads(VENUE_LOG_FILE.read_text()) if VENUE_LOG_FILE.exists() else {}
-    key = _venue_key(venue)
-    newest = max(departure, last_departure(venue) or departure)
-    log[key] = newest.isoformat()
+    for v in _as_list(venue):
+        newest = max(departure, last_departure(v) or departure)
+        log[_venue_key(v)] = newest.isoformat()
     _write_atomic(VENUE_LOG_FILE, json.dumps(log, indent=2))
 
 
@@ -69,6 +76,36 @@ def bump_number():
     _write_atomic(COUNTER_FILE, json.dumps(data))
 
 
+HOTELS_FILE = Path(os.environ.get("RFP_HOTELS_CONFIG")
+                   or Path(__file__).resolve().parent.parent / "config" / "rfp-hotels.json")
+_SKIP_WORDS = {"a", "an", "and", "at", "by", "for", "in", "of", "the"}
+
+
+def venue_code(venue):
+    """Code for one venue, or the codes of several joined with '-' (e.g. 'WIA-HBR')."""
+    if not isinstance(venue, str):
+        return "-".join(filter(None, (venue_code(v) for v in venue)))
+    return _venue_code(venue)
+
+
+def _venue_code(venue):
+    """Short code for a hotel, e.g. 'Wyndham Indianapolis Airport' -> 'WIA'.
+
+    Uses an optional "code" on the hotel's entry in the hotels file, else the initials of its words
+    (ignoring 'by', 'at', 'the'... and anything after ' - ').
+    """
+    try:
+        for h in json.loads(HOTELS_FILE.read_text()).get("hotels", []):
+            names = {_venue_key(str(h.get("venue_name") or "")), _venue_key(str(h.get("name") or ""))}
+            if h.get("code") and _venue_key(venue) in names:
+                return str(h["code"]).strip().upper()
+    except (OSError, ValueError, AttributeError):
+        pass
+    head = (venue or "").split(" - ")[0]
+    words = [w for w in re.split(r"[^A-Za-z0-9]+", head) if w and w.lower() not in _SKIP_WORDS]
+    return "".join(w[0] for w in words).upper()
+
+
 def run_values(today=None, venue=None):
     today = today or date.today()
     n = peek_number()
@@ -78,7 +115,8 @@ def run_values(today=None, venue=None):
         "departure": departure,
         "reply_by": today + timedelta(days=config.REPLY_BY_DAYS),
         "email": f"{config.EMAIL_PREFIX}{n:03d}@{config.EMAIL_DOMAIN}",
-        "org_name": f"{today.strftime('%d %b').upper()} {config.ORG_BASE_NAME} {n:03d}",
+        "org_name": " ".join(filter(None, [today.strftime('%d %b').upper(), config.ORG_BASE_NAME,
+                                          venue_code(venue), f"{n:03d}"])),
         "number": n,
     }
 

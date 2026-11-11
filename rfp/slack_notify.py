@@ -164,8 +164,8 @@ def ask_yes_no(question, images=(), details=None):
     for path, comment in images:
         send_image(path, comment)
     if details:
-        text = details if len(details) < 3500 else details[:3500] + "\n...(truncated)"
-        send_text(f"```{text}```")
+        for i in range(0, len(details), 3500):   # send everything, in chunks, never truncate
+            send_text(f"```{details[i:i + 3500]}```")
 
     posted = send_text(f"{question}\nReply *yes* to continue or *no* to cancel.")
     ts = posted["ts"]
@@ -187,14 +187,14 @@ def ask_yes_no(question, images=(), details=None):
     return False
 
 
-CHOICE_PICKED = re.compile(r"Event type: \*(.+?)\*")
+CHOICE_PICKED = re.compile(r"(?:Event type|Room setup): \*(.+?)\*")
 
 
-def ask_choice(question, options):
+def ask_choice(question, options, action_id="rfp_event_type", placeholder="Select event type"):
     """Ask for one of `options` (list of strings) and return the pick, or None on timeout.
 
     Slack: posts a dropdown. The Socket Mode bot (src/slack-bot.js) turns the message into
-    "Event type: *<pick>*" when someone chooses, and this function reads that back.
+    "Event type: *<pick>*" (or "Room setup: *<pick>*") when someone chooses, and this function reads that back.
     """
     if terminal_mode():
         print("\n" + question.replace("*", ""), flush=True)
@@ -225,9 +225,9 @@ def ask_choice(question, options):
         channel=_channel(), text=question,
         blocks=[
             {"type": "section", "text": {"type": "mrkdwn", "text": question}},
-            {"type": "actions", "block_id": "rfp_event_type", "elements": [{
-                "type": "static_select", "action_id": "rfp_event_type",
-                "placeholder": {"type": "plain_text", "text": "Select event type"},
+            {"type": "actions", "block_id": action_id, "elements": [{
+                "type": "static_select", "action_id": action_id,
+                "placeholder": {"type": "plain_text", "text": placeholder},
                 "options": [{"text": {"type": "plain_text", "text": o[:75]}, "value": o[:150]}
                             for o in options[:100]],
             }]},
@@ -240,5 +240,5 @@ def ask_choice(question, options):
         m = CHOICE_PICKED.search(msgs[0].get("text", "")) if msgs else None
         if m and m.group(1) in options:
             return m.group(1)
-    send_text("No event type chosen in time. Cancelling.")
+    send_text("No choice made in time. Cancelling.")
     return None

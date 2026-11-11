@@ -22,9 +22,9 @@
       "params": [
         {
           "key": "venue_name",
-          "description": "Exact venue title as shown on Cvent.",
+          "description": "Exact venue title as shown on Cvent. Several venues for one RFP: separate them with |.",
           "required": true,
-          "pattern": "^[A-Za-z0-9À-ÿ &'’.,()/:-]{2,150}$"
+          "pattern": "^[A-Za-z0-9À-ÿ &'’.,()/:|-]{2,1500}$"
         },
         {
           "key": "slack_channel_id",

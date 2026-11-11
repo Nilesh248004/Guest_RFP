@@ -64,8 +64,6 @@ def enter_venue_name(page, venue):
     print("Now on:", page.url)
     shot(page, "step3")
 
-    select_venue(page, venue)
-
 
 FORM_NAV_TIMEOUT_MS = 30000
 FORM_NAV_ATTEMPTS = 3
@@ -146,7 +144,7 @@ def fill_event_details(page):
     RUN["event_type"] = event_type
     print("Event type:", event_type)
 
-    arrival, departure = dates.event_dates(venue=RUN["venue"])
+    arrival, departure = dates.event_dates(venue=RUN["venues"])
     RUN["arrival"], RUN["departure"] = arrival, departure
     print(f"Event: {arrival:%m/%d/%Y} -> {departure:%m/%d/%Y}")
     start, end = arrival.strftime("%m/%d/%Y"), departure.strftime("%m/%d/%Y")
@@ -197,10 +195,22 @@ def set_checkbox(page, box_id, want):
 
 AGENDA = [
     dict(function="General session", start="11:00 am", end="4:30 pm",
-         layout="Conference", attendees="50", av=True),
+         layout="Conference", attendees="50", av=True, pick_layout=True),
     dict(function="Dinner", start="7:00 pm", end="8:00 pm",
-         layout="Buffet", attendees="50", av=False),
+         layout="Buffet", attendees="50", av=False, pick_layout=True),
 ]
+
+
+def choose_room_setup(page, item):
+    """Offer Cvent's own room setups (theatre, reception, ...) as a Slack dropdown."""
+    labels = [o.strip() for o in page.locator("select#setupType option").all_inner_texts()]
+    labels = [l for l in labels if l and not re.match(r"(select|choose)\b", l, re.I)]
+    picked = slack_notify.ask_choice(
+        f"Which *room setup* for the *{item['function']}* ({item['start']} - {item['end']})?", labels,
+        action_id="rfp_room_setup", placeholder="Select room setup")
+    if not picked:
+        raise Cancelled("No room setup was chosen.")
+    return picked
 
 
 def add_agenda_item(page, item):
@@ -208,6 +218,8 @@ def add_agenda_item(page, item):
     page.locator("select#functionType").select_option(label=item["function"])
     page.locator("select#startTime").select_option(label=item["start"])
     page.locator("select#endTime").select_option(label=item["end"])
+    if item.get("pick_layout"):
+        item["layout"] = choose_room_setup(page, item)
     page.locator("select#setupType").select_option(label=item["layout"])
     page.locator("#attendeeCount").fill(item["attendees"])
     set_checkbox(page, "AVNeeded_0", item["av"])
@@ -239,7 +251,7 @@ def fill_meeting_space(page):
 
 
 def fill_contact_details(page):
-    run = dates.run_values(venue=RUN["venue"])
+    run = dates.run_values(venue=RUN["venues"])
     n = run["number"]
     page.locator("#email").wait_for(state="visible", timeout=20000)
 
@@ -274,26 +286,79 @@ def fill_contact_details(page):
     review_and_submit(page, run)
 
 
+SHOW_MORE = re.compile(r"^\s*show more\s*$", re.I)
+CLOSE = re.compile(r"^\s*close\s*$", re.I)
+
+
+def open_show_more_details(page):
+    """Click every 'Show more' and leave the sections open, so the final full-page screenshot shows
+    everything. If a 'Show more' opens a pop-up instead of expanding in place, that pop-up is
+    screenshotted and read, then closed, so the next one can be opened.
+    Returns [(png_path, label, text)] for the pop-ups only."""
+    def toggles():
+        return page.get_by_text(SHOW_MORE).locator("visible=true")
+
+    found, skip = [], 0
+    for _ in range(12):
+        before = toggles().count()
+        if before <= skip:
+            break
+        try:
+            toggles().nth(skip).click(timeout=3000)
+            page.wait_for_timeout(1500)
+        except Exception as e:
+            print(f"Could not click 'Show more': {e}")
+            break
+        if toggles().count() < before:
+            continue                      # expanded in place; leave it open
+        # still there: it opened a pop-up, so capture it and close it
+        name = f"step10_detail_{len(found) + 1}"
+        shot(page, name)
+        text, label = "", f"Details {len(found) + 1}"
+        try:
+            popup = page.locator('[role="dialog"], .modal, [class*="modal" i]').locator("visible=true").first
+            text = popup.inner_text(timeout=2000).strip()
+            label = text.splitlines()[0].strip() if text else label
+        except Exception:
+            pass
+        found.append((f"{name}.png", label, text))
+        try:
+            page.get_by_text(CLOSE).locator("visible=true").first.click(timeout=3000)
+        except Exception:
+            page.keyboard.press("Escape")
+        page.wait_for_timeout(800)
+        skip += 1
+    print(f"'Show more': {len(found)} pop-up(s); {toggles().count()} left unopened")
+    return found
+
+
 def review_and_submit(page, run):
     """Send the review page to Slack; submit only after a 'yes'."""
     page.locator("#submit-btn").wait_for(state="visible", timeout=30000)
     page.wait_for_timeout(2000)
+    popups = open_show_more_details(page)
     shot_full(page, "step10_review")
 
     body = page.locator("body").inner_text()
     start = body.find("EVENT DETAILS", max(body.find("You're almost finished"), 0))
     end = body.find("Privacy policy")
     details = body[max(start, 0): end if end > 0 else len(body)].strip()
-    # the page hides these behind "Show more", so list them from what the script entered
-    details += "\n\nGUEST ROOMS PER NIGHT: 10 single, 20 double"
-    details += "\nAGENDA (every day):"
-    for item in AGENDA:
-        details += (f"\n- {item['function']} {item['start']}-{item['end']}, {item['layout']}, "
-                    f"{item['attendees']} attendees, AV {'yes' if item['av'] else 'no'}")
+    for _, label, text in popups:
+        if text:
+            details += f"\n\n--- {label} ---\n{text}"
+    if not any(text for _, _, text in popups):
+        # the pop-ups could not be read, so list the hidden parts from what the script entered
+        details += "\n\nGUEST ROOMS PER NIGHT: 10 single, 20 double"
+        details += "\nAGENDA (every day):"
+        for item in AGENDA:
+            details += (f"\n- {item['function']} {item['start']}-{item['end']}, {item['layout']}, "
+                        f"{item['attendees']} attendees, AV {'yes' if item['av'] else 'no'}")
+    images = [("step10_review.png", "RFP review page")]
+    images += [(path, f"Show more: {label}") for path, label, _ in popups]
 
     ok = slack_notify.ask_yes_no(
         "Please confirm the RFP details above before it is submitted.",
-        images=[("step10_review.png", "RFP review page")],
+        images=images,
         details=details,
     )
     if not ok:
@@ -303,7 +368,7 @@ def review_and_submit(page, run):
     # page after it fails, the RFP may still exist on Cvent, and reusing its email/org
     # number would be worse than skipping one.
     dates.bump_number()
-    dates.record_event(RUN["venue"], RUN["departure"])
+    dates.record_event(RUN["venues"], RUN["departure"])
     print("Counter moved on from", run["number"])
     page.locator("#submit-btn").click()
     page.wait_for_timeout(5000)
@@ -356,8 +421,8 @@ def cart_count(page):
     return int(digits[0]) if digits else 0
 
 
-def select_venue(page, venue):
-    RUN["venue"] = venue.strip()
+def select_venue(page, venue, first=True):
+    """Add `venue` to the cart. The first venue starts from an empty cart; later ones are added to it."""
     wanted = venue.strip()
     titles = page.locator("h3[title]")
     try:
@@ -365,7 +430,9 @@ def select_venue(page, venue):
         page.locator(f'h3[title={_css_str(wanted)}]').first.wait_for(state="visible", timeout=10000)
     except PWTimeout:
         pass  # handled below with a clear message
-    clear_cart(page)
+    if first:
+        clear_cart(page)
+    expected = len(RUN["selected"]) + 1
     for h3 in titles.all():
         if (h3.get_attribute("title") or "").strip() == wanted:
             # outermost ancestor holding only this one venue title = this venue's card
@@ -374,21 +441,51 @@ def select_venue(page, venue):
             with page.expect_response(_cart_post):
                 card.locator('button[aria-label="Select venue"]:visible').first.click()
             page.wait_for_timeout(3000)  # let the cart finish updating
-            if cart_count(page) != 1:
-                raise RuntimeError(f"Cart holds {cart_count(page)} venues, expected only {wanted}.")
+            if cart_count(page) != expected:
+                raise RuntimeError(f"Cart holds {cart_count(page)} venues, expected {expected} "
+                                   f"after adding {wanted}.")
+            RUN["selected"].append(wanted)
             print("Selected venue:", h3.get_attribute("title"))
             shot(page, "step4")
-            # step4.png shows the venue marked "Selected"; nothing is submitted by a "no" here
-            if not slack_notify.ask_yes_no(f"Is this the right venue: *{wanted}*?",
-                                           images=[("step4.png", "Venue selected on Cvent")]):
-                raise Cancelled("Venue was not confirmed.")
-            request_quotes(page)
             return
     shot(page, "step4_not_found")
     raise PWTimeout(f"'{venue}' not found among the {titles.count()} results shown (see step4_not_found.png)")
 
 
-RUN = {}   # venue name and event dates for this run
+def show_cart(page, count):
+    """Open the 'Venues N' cart panel and wait until it lists `count` venues."""
+    items = page.locator('[data-cvent-id="shopping-cart-remove-button"]')
+    for attempt in range(3):
+        if items.count() >= count:
+            break
+        page.locator('[data-cvent-id="shopping-cart-button"]').first.click()
+        try:
+            items.nth(count - 1).wait_for(state="visible", timeout=5000)
+        except PWTimeout:
+            print(f"Cart panel not showing {count} venues yet (attempt {attempt + 1})")
+    page.wait_for_timeout(800)
+
+
+def confirm_venues_and_request(page):
+    """Show the cart (every chosen venue) in Slack; only a 'yes' goes on to the request form."""
+    RUN["venue"] = ", ".join(RUN["venues"])
+    if len(RUN["venues"]) > 1:   # the cart lists all of them; step4.png only shows the last one added
+        try:
+            show_cart(page, len(RUN["venues"]))
+            shot(page, "step4")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(500)
+        except Exception as e:
+            print("Could not photograph the cart:", e)
+    names = ", ".join(f"*{v}*" for v in RUN["venues"])
+    question = (f"Is this the right venue: {names}?" if len(RUN["venues"]) == 1
+                else f"Are these the right {len(RUN['venues'])} venues: {names}?")
+    if not slack_notify.ask_yes_no(question, images=[("step4.png", "Venue(s) selected on Cvent")]):
+        raise Cancelled("Venue was not confirmed.")
+    request_quotes(page)
+
+
+RUN = {}   # venues and event dates for this run
 
 
 def advice(error):
@@ -426,7 +523,7 @@ class Cancelled(Exception):
 
 def main():
     parser = argparse.ArgumentParser(description="Create a Guest RFP on Cvent for one venue.")
-    parser.add_argument("--venue", help="exact venue title as shown on Cvent")
+    parser.add_argument("--venue", help="exact venue title as shown on Cvent; several venues separated by |")
     parser.add_argument("--headless", action="store_true", help="run without a visible browser (the default)")
     parser.add_argument("--headed", action="store_true", help="show the browser window while it runs")
     parser.add_argument("--terminal", action="store_true",
@@ -439,7 +536,15 @@ def main():
     elif args.relay:
         os.environ["RFP_CONFIRM_MODE"] = "relay"
     args.headless = not args.headed
-    venue = args.venue or input("Enter venue name: ")
+    raw = args.venue or input("Enter venue name (several: separate with |): ")
+    venues = []
+    for v in raw.split("|"):
+        v = v.strip()
+        if v and v.lower() not in [x.lower() for x in venues]:
+            venues.append(v)
+    if not venues:
+        sys.exit("No venue given.")
+    RUN["venues"], RUN["selected"], RUN["venue"] = venues, [], ", ".join(venues)
 
     slack_notify.check_config()
     result = "FAILED"
@@ -451,8 +556,11 @@ def main():
         context = browser.new_context()   # fresh cookies and storage on every run
         page = context.new_page()
         try:
-            open_find_venues(page)
-            enter_venue_name(page, venue)
+            for i, venue in enumerate(venues):
+                open_find_venues(page)
+                enter_venue_name(page, venue)
+                select_venue(page, venue, first=(i == 0))
+            confirm_venues_and_request(page)
             result = "SUBMITTED"
         except Cancelled as e:
             result = "CANCELLED"
