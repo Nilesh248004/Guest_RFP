@@ -453,30 +453,31 @@ def select_venue(page, venue, first=True):
 
 
 def show_cart(page, count):
-    """Open the 'Venues N' cart panel and wait until it lists `count` venues."""
-    items = page.locator('[data-cvent-id="shopping-cart-remove-button"]')
+    """Click the 'Venues N' button and wait until the panel visibly lists `count` venues."""
+    items = page.locator('[data-cvent-id="shopping-cart-remove-button"]').locator("visible=true")
     for attempt in range(3):
         if items.count() >= count:
-            break
+            break   # already open and showing every venue
         page.locator('[data-cvent-id="shopping-cart-button"]').first.click()
         try:
             items.nth(count - 1).wait_for(state="visible", timeout=5000)
         except PWTimeout:
             print(f"Cart panel not showing {count} venues yet (attempt {attempt + 1})")
+    else:
+        raise RuntimeError(f"The cart panel never showed {count} venues")
     page.wait_for_timeout(800)
 
 
 def confirm_venues_and_request(page):
     """Show the cart (every chosen venue) in Slack; only a 'yes' goes on to the request form."""
     RUN["venue"] = ", ".join(RUN["venues"])
-    if len(RUN["venues"]) > 1:   # the cart lists all of them; step4.png only shows the last one added
-        try:
-            show_cart(page, len(RUN["venues"]))
-            shot(page, "step4")
-            page.keyboard.press("Escape")
-            page.wait_for_timeout(500)
-        except Exception as e:
-            print("Could not photograph the cart:", e)
+    try:   # photograph the opened cart: it lists every selected venue
+        show_cart(page, len(RUN["venues"]))
+        shot(page, "step4")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+    except Exception as e:
+        print("Could not photograph the cart:", e)
     names = ", ".join(f"*{v}*" for v in RUN["venues"])
     question = (f"Is this the right venue: {names}?" if len(RUN["venues"]) == 1
                 else f"Are these the right {len(RUN['venues'])} venues: {names}?")
